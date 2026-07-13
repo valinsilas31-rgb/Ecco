@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Core UP — Painel Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #07060e;
+      --surface: #0f0d1a;
+      --surface2: #17152a;
+      --border: rgba(255,255,255,0.07);
+      --violet: #7c3aed;
+      --violet-light: #a78bfa;
+      --violet-dim: rgba(124,58,237,0.15);
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #eab308;
+      --text: #f1f0f9;
+      --muted: rgba(241,240,249,0.4);
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+    }
+
+    /* Login Screen */
+    #login-screen {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at 50% 0%, rgba(124,58,237,0.18) 0%, var(--bg) 70%);
+    }
+    .login-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 48px;
+      width: 380px;
+      box-shadow: 0 0 80px rgba(124,58,237,0.12);
+    }
+    .login-box h1 { font-size: 26px; font-weight: 900; letter-spacing: -1px; margin-bottom: 6px; }
+    .login-box p { color: var(--muted); font-size: 13px; margin-bottom: 32px; }
+    .login-box input {
+      width: 100%; padding: 14px 16px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; color: var(--text); font-family: 'Outfit', sans-serif;
+      font-size: 14px; margin-bottom: 12px; outline: none;
+      transition: border-color 0.2s;
+    }
+    .login-box input:focus { border-color: var(--violet); }
+    .login-box .error { color: var(--red); font-size: 12px; margin-bottom: 12px; min-height: 18px; }
+    .btn-primary {
+      width: 100%; padding: 14px;
+      background: linear-gradient(135deg, var(--violet), #5b21b6);
+      border: none; border-radius: 12px;
+      color: white; font-family: 'Outfit', sans-serif; font-weight: 700;
+      font-size: 13px; letter-spacing: 1px; text-transform: uppercase;
+      cursor: pointer; transition: all 0.2s;
+      box-shadow: 0 4px 24px rgba(124,58,237,0.35);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 32px rgba(124,58,237,0.5); }
+    .btn-primary:active { transform: translateY(0); }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px; background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 28px 16px;
+      position: fixed; top: 0; left: 0; height: 100vh;
+    }
+    .sidebar-logo { display: flex; align-items: center; gap: 10px; padding: 0 8px; margin-bottom: 36px; }
+    .sidebar-logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--violet); box-shadow: 0 0 12px var(--violet); }
+    .sidebar-logo span { font-size: 17px; font-weight: 900; letter-spacing: -0.5px; }
+    .sidebar-logo small { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border-radius: 10px; cursor: pointer;
+      color: var(--muted); font-size: 13px; font-weight: 600;
+      letter-spacing: 0.3px; transition: all 0.15s; margin-bottom: 2px;
+      user-select: none;
+    }
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active { background: var(--violet-dim); color: var(--violet-light); }
+    .nav-item svg { flex-shrink: 0; }
+
+    .sidebar-footer { margin-top: auto; padding: 12px; border-radius: 12px; background: var(--surface2); }
+    .sidebar-footer p { font-size: 11px; color: var(--muted); }
+    .sidebar-footer strong { color: var(--text); font-size: 12px; }
+
+    /* Main */
+    .main { margin-left: 240px; flex: 1; padding: 36px; min-height: 100vh; }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-header { margin-bottom: 28px; }
+    .page-header h2 { font-size: 24px; font-weight: 900; letter-spacing: -0.5px; }
+    .page-header p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+    /* Stats grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 20px 24px;
+    }
+    .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 32px; font-weight: 900; letter-spacing: -1px; }
+    .stat-card .value.green { color: var(--green); }
+    .stat-card .value.red { color: var(--red); }
+    .stat-card .value.violet { color: var(--violet-light); }
+
+    /* Toolbar */
+    .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .search-input {
+      padding: 10px 14px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; color: var(--text); font-family: 'Outfit', sans-serif;
+      font-size: 13px; outline: none; flex: 1; min-width: 200px;
+      transition: border-color 0.2s;
+    }
+    .search-input:focus { border-color: var(--violet); }
+    .search-input::placeholder { color: var(--muted); }
+
+    .btn {
+      padding: 10px 18px; border-radius: 10px; border: none; cursor: pointer;
+      font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 12px;
+      letter-spacing: 0.5px; text-transform: uppercase; transition: all 0.15s; white-space: nowrap;
+    }
+    .btn-violet { background: var(--violet); color: white; }
+    .btn-violet:hover { background: #6d28d9; }
+    .btn-ghost { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+    .btn-ghost:hover { background: var(--surface2); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-success { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
+    .btn-success:hover { background: rgba(34,197,94,0.25); }
+    .btn-sm { padding: 6px 12px; font-size: 11px; }
+
+    /* Table */
+    .table-wrap {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      padding: 12px 16px; text-align: left;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--muted);
+      background: var(--surface2); border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 12px 16px; font-size: 13px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700;
+    }
+    .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .badge-green { background: rgba(34,197,94,0.1); color: var(--green); }
+    .badge-green::before { background: var(--green); }
+    .badge-red { background: rgba(239,68,68,0.1); color: var(--red); }
+    .badge-red::before { background: var(--red); }
+    .badge-yellow { background: rgba(234,179,8,0.1); color: var(--yellow); }
+    .badge-yellow::before { background: var(--yellow); }
+    .badge-violet { background: rgba(124,58,237,0.1); color: var(--violet-light); }
+    .badge-violet::before { background: var(--violet-light); }
+
+    .key-code {
+      font-family: monospace; font-size: 12px;
+      background: var(--surface2); padding: 4px 8px; border-radius: 6px;
+      cursor: pointer; user-select: all;
+    }
+    .key-code:hover { background: var(--violet-dim); }
+
+    /* Modal */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 500;
+      background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 36px; width: 480px;
+      box-shadow: 0 0 80px rgba(124,58,237,0.15);
+    }
+    .modal h3 { font-size: 18px; font-weight: 900; margin-bottom: 6px; }
+    .modal p { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+    .modal label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .modal input, .modal select {
+      width: 100%; padding: 12px 14px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; color: var(--text); font-family: 'Outfit', sans-serif;
+      font-size: 13px; margin-bottom: 16px; outline: none; transition: border-color 0.2s;
+    }
+    .modal input:focus, .modal select:focus { border-color: var(--violet); }
+    .modal select option { background: var(--surface2); }
+    .modal-actions { display: flex; gap: 10px; margin-top: 8px; }
+    .modal-actions .btn { flex: 1; }
+
+    /* Generated keys list */
+    .keys-list {
+      background: var(--surface2); border-radius: 10px; padding: 14px;
+      font-family: monospace; font-size: 12px; line-height: 2;
+      max-height: 200px; overflow-y: auto; margin-bottom: 16px;
+      border: 1px solid var(--border);
+      white-space: pre-wrap; word-break: break-all;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      padding: 14px 20px; border-radius: 12px;
+      font-size: 13px; font-weight: 600;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      animation: slideIn 0.3s ease;
+    }
+    .toast.success { background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); color: var(--green); }
+    .toast.error { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: var(--red); }
+    @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: none; opacity: 1; } }
+
+    /* Logs */
+    .log-row td:nth-child(4) { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+  </style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px">
+      <div style="width:12px;height:12px;border-radius:50%;background:#7c3aed;box-shadow:0 0 16px #7c3aed"></div>
+      <div>
+        <h1>Core UP</h1>
+        <p style="margin:0">Painel de Licenças</p>
+      </div>
+    </div>
+    <div class="error" id="login-error"></div>
+    <input type="password" id="admin-pass" placeholder="Senha do administrador" />
+    <button class="btn-primary" onclick="doLogin()">Entrar no Painel</button>
+  </div>
+</div>
+
+<!-- SIDEBAR -->
+<div class="sidebar" id="sidebar" style="display:none">
+  <div class="sidebar-logo">
+    <div class="dot"></div>
+    <div>
+      <span>Core UP</span><br>
+      <small>Admin Panel</small>
+    </div>
+  </div>
+
+  <div class="nav-item active" onclick="navigate('dashboard')" id="nav-dashboard">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    Dashboard
+  </div>
+  <div class="nav-item" onclick="navigate('keys')" id="nav-keys">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+    Licenças / Keys
+  </div>
+  <div class="nav-item" onclick="navigate('users')" id="nav-users">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    Usuários
+  </div>
+  <div class="nav-item" onclick="navigate('logs')" id="nav-logs">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+    Logs de Acesso
+  </div>
+
+  <div class="sidebar-footer">
+    <p>Servidor ativo em</p>
+    <strong id="server-url">localhost:3000</strong>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main" id="main-content" style="display:none">
+
+  <!-- DASHBOARD -->
+  <div class="page active" id="page-dashboard">
+    <div class="page-header">
+      <h2>Dashboard</h2>
+      <p>Visão geral do sistema de licenças</p>
+    </div>
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card"><div class="label">Total de Keys</div><div class="value violet" id="stat-total">—</div></div>
+      <div class="stat-card"><div class="label">Keys Usadas</div><div class="value" id="stat-used">—</div></div>
+      <div class="stat-card"><div class="label">Keys Revogadas</div><div class="value red" id="stat-revoked">—</div></div>
+      <div class="stat-card"><div class="label">Total de Usuários</div><div class="value violet" id="stat-users">—</div></div>
+      <div class="stat-card"><div class="label">Usuários Bloqueados</div><div class="value red" id="stat-blocked">—</div></div>
+      <div class="stat-card"><div class="label">Acessos (24h)</div><div class="value green" id="stat-logs">—</div></div>
+    </div>
+    <div style="display:flex;gap:12px">
+      <button class="btn btn-violet" onclick="openGenerateModal()">+ Gerar Keys</button>
+      <button class="btn btn-ghost" onclick="loadStats()">↻ Atualizar</button>
+    </div>
+  </div>
+
+  <!-- KEYS -->
+  <div class="page" id="page-keys">
+    <div class="page-header">
+      <h2>Licenças / Keys</h2>
+      <p>Gerencie todas as chaves de licença</p>
+    </div>
+    <div class="toolbar">
+      <input class="search-input" type="text" placeholder="Buscar key, usuário..." id="key-search" oninput="filterKeys()" />
+      <button class="btn btn-violet" onclick="openGenerateModal()">+ Gerar Keys</button>
+      <button class="btn btn-ghost" onclick="loadKeys()">↻ Atualizar</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Status</th>
+            <th>Usuário</th>
+            <th>Criada em</th>
+            <th>Expira em</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="keys-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- USERS -->
+  <div class="page" id="page-users">
+    <div class="page-header">
+      <h2>Usuários</h2>
+      <p>Gerencie contas cadastradas no sistema</p>
+    </div>
+    <div class="toolbar">
+      <input class="search-input" type="text" placeholder="Buscar usuário..." id="user-search" oninput="filterUsers()" />
+      <button class="btn btn-ghost" onclick="loadUsers()">↻ Atualizar</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Usuário</th>
+            <th>Key Vinculada</th>
+            <th>Status</th>
+            <th>Criado em</th>
+            <th>Último Login</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- LOGS -->
+  <div class="page" id="page-logs">
+    <div class="page-header">
+      <h2>Logs de Acesso</h2>
+      <p>Últimos 200 eventos de login e registro</p>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-ghost" onclick="loadLogs()">↻ Atualizar</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Horário</th>
+            <th>Usuário</th>
+            <th>Ação</th>
+            <th>Status</th>
+            <th>Mensagem</th>
+            <th>IP</th>
+          </tr>
+        </thead>
+        <tbody id="logs-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- MODAL GERAR KEYS -->
+<div class="modal-overlay" id="modal-generate">
+  <div class="modal">
+    <h3>Gerar Novas Keys</h3>
+    <p>As keys geradas ficam salvas no banco de dados e prontas para uso.</p>
+    <label>Quantidade</label>
+    <input type="number" id="gen-qty" value="1" min="1" max="100" />
+    <label>Expiração (dias) — deixe 0 para vitalícia</label>
+    <input type="number" id="gen-days" value="0" min="0" />
+    <label>Nota / Observação (opcional)</label>
+    <input type="text" id="gen-note" placeholder="Ex: Pacote Black, Cliente VIP..." />
+    <div id="gen-result" class="keys-list" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-violet" onclick="generateKeys()" id="gen-btn">Gerar Keys</button>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="copy-keys-btn" style="display:none;width:100%;margin-top:8px" onclick="copyKeys()">📋 Copiar Todas</button>
+  </div>
+</div>
+
+<script>
+  let ADMIN_PASSWORD = '';
+  let allKeys = [];
+  let allUsers = [];
+
+  // ----- Login -----
+  document.getElementById('admin-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  async function doLogin() {
+    const pass = document.getElementById('admin-pass').value.trim();
+    if (!pass) return;
+
+    const res = await api('/api/admin/stats', 'GET', null, pass);
+    if (res && res.success) {
+      ADMIN_PASSWORD = pass;
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('sidebar').style.display = 'flex';
+      document.getElementById('main-content').style.display = 'block';
+      document.getElementById('server-url').textContent = window.location.host;
+      loadAll();
+    } else {
+      document.getElementById('login-error').textContent = '❌ Senha incorreta.';
+    }
+  }
+
+  // ----- API -----
+  async function api(endpoint, method = 'GET', body = null, overridePass = null) {
+    try {
+      const opts = {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-password': overridePass || ADMIN_PASSWORD
+        }
+      };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch(endpoint, opts);
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ----- Navigation -----
+  function navigate(page) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    document.getElementById('nav-' + page).classList.add('active');
+    if (page === 'keys') loadKeys();
+    if (page === 'users') loadUsers();
+    if (page === 'logs') loadLogs();
+    if (page === 'dashboard') loadStats();
+  }
+
+  function loadAll() { loadStats(); }
+
+  // ----- Stats -----
+  async function loadStats() {
+    const res = await api('/api/admin/stats');
+    if (!res) return;
+    const s = res.stats;
+    document.getElementById('stat-total').textContent = s.totalKeys;
+    document.getElementById('stat-used').textContent = s.usedKeys;
+    document.getElementById('stat-revoked').textContent = s.revokedKeys;
+    document.getElementById('stat-users').textContent = s.totalUsers;
+    document.getElementById('stat-blocked').textContent = s.blockedUsers;
+    document.getElementById('stat-logs').textContent = s.recentLogs;
+  }
+
+  // ----- Keys -----
+  async function loadKeys() {
+    const res = await api('/api/admin/keys');
+    if (!res) return;
+    allKeys = res.data;
+    renderKeys(allKeys);
+  }
+
+  function filterKeys() {
+    const q = document.getElementById('key-search').value.toLowerCase();
+    renderKeys(allKeys.filter(k => k.id.toLowerCase().includes(q) || (k.username || '').toLowerCase().includes(q)));
+  }
+
+  function renderKeys(keys) {
+    const tbody = document.getElementById('keys-tbody');
+    tbody.innerHTML = '';
+    if (!keys.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">Nenhuma key encontrada</td></tr>';
+      return;
+    }
+    keys.forEach(k => {
+      const status = k.revoked ? 'revogada' : (k.used ? 'em uso' : 'disponível');
+      const badgeClass = k.revoked ? 'badge-red' : (k.used ? 'badge-violet' : 'badge-green');
+      const expires = k.expires_at ? new Date(k.expires_at).toLocaleDateString('pt-BR') : 'Vitalícia';
+      const created = new Date(k.created_at).toLocaleDateString('pt-BR');
+      tbody.innerHTML += `
+        <tr>
+          <td><span class="key-code" title="Clique para copiar" onclick="copyText('${k.id}')">${k.id}</span></td>
+          <td><span class="badge ${badgeClass}">${status}</span></td>
+          <td>${k.username || '<span style="color:var(--muted)">—</span>'}</td>
+          <td>${created}</td>
+          <td>${expires}</td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap">
+            ${!k.revoked ? `<button class="btn btn-danger btn-sm" onclick="revokeKey('${k.id}')">Revogar</button>` : ''}
+            ${k.used ? `<button class="btn btn-ghost btn-sm" onclick="resetHwid('${k.id}')">Reset HWID</button>` : ''}
+          </td>
+        </tr>`;
+    });
+  }
+
+  async function revokeKey(id) {
+    if (!confirm(`Revogar key ${id}? O usuário perderá acesso imediatamente.`)) return;
+    const res = await api('/api/admin/revoke-key', 'POST', { key_id: id });
+    if (res?.success) { toast('Key revogada com sucesso!', 'success'); loadKeys(); loadStats(); }
+    else toast('Erro ao revogar key.', 'error');
+  }
+
+  async function resetHwid(id) {
+    if (!confirm(`Resetar HWID da key ${id}? O usuário poderá logar de outro PC.`)) return;
+    const res = await api('/api/admin/reset-hwid', 'POST', { key_id: id });
+    if (res?.success) { toast('HWID resetado!', 'success'); loadKeys(); }
+    else toast('Erro ao resetar HWID.', 'error');
+  }
+
+  // ----- Users -----
+  async function loadUsers() {
+    const res = await api('/api/admin/users');
+    if (!res) return;
+    allUsers = res.data;
+    renderUsers(allUsers);
+  }
+
+  function filterUsers() {
+    const q = document.getElementById('user-search').value.toLowerCase();
+    renderUsers(allUsers.filter(u => u.username.toLowerCase().includes(q)));
+  }
+
+  function renderUsers(users) {
+    const tbody = document.getElementById('users-tbody');
+    tbody.innerHTML = '';
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">Nenhum usuário encontrado</td></tr>';
+      return;
+    }
+    users.forEach(u => {
+      const lastLogin = u.last_login ? new Date(u.last_login).toLocaleString('pt-BR') : 'Nunca';
+      const created = new Date(u.created_at).toLocaleDateString('pt-BR');
+      tbody.innerHTML += `
+        <tr>
+          <td><strong>${u.username}</strong></td>
+          <td><span class="key-code" onclick="copyText('${u.key_id}')">${u.key_id.slice(0,20)}...</span></td>
+          <td><span class="badge ${u.blocked ? 'badge-red' : 'badge-green'}">${u.blocked ? 'bloqueado' : 'ativo'}</span></td>
+          <td>${created}</td>
+          <td>${lastLogin}</td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn ${u.blocked ? 'btn-success' : 'btn-danger'} btn-sm" onclick="toggleBlock('${u.username}', ${u.blocked})">${u.blocked ? 'Desbloquear' : 'Bloquear'}</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.username}')">Deletar</button>
+          </td>
+        </tr>`;
+    });
+  }
+
+  async function toggleBlock(username, blocked) {
+    const action = blocked ? 'desbloquear' : 'bloquear';
+    if (!confirm(`Deseja ${action} o usuário ${username}?`)) return;
+    const res = await api('/api/admin/toggle-block-user', 'POST', { username });
+    if (res?.success) { toast(`Usuário ${blocked ? 'desbloqueado' : 'bloqueado'}!`, 'success'); loadUsers(); loadStats(); }
+  }
+
+  async function deleteUser(username) {
+    if (!confirm(`DELETAR o usuário ${username}? A key será liberada para novo uso.`)) return;
+    const res = await api('/api/admin/delete-user', 'POST', { username });
+    if (res?.success) { toast('Usuário deletado e key liberada!', 'success'); loadUsers(); loadKeys(); loadStats(); }
+  }
+
+  // ----- Logs -----
+  async function loadLogs() {
+    const res = await api('/api/admin/logs');
+    if (!res) return;
+    const tbody = document.getElementById('logs-tbody');
+    tbody.innerHTML = '';
+    res.data.forEach(l => {
+      const time = new Date(l.timestamp).toLocaleString('pt-BR');
+      tbody.innerHTML += `
+        <tr class="log-row">
+          <td style="color:var(--muted);font-size:12px">${time}</td>
+          <td>${l.username}</td>
+          <td><span class="badge badge-violet">${l.action}</span></td>
+          <td><span class="badge ${l.success ? 'badge-green' : 'badge-red'}">${l.success ? 'sucesso' : 'falhou'}</span></td>
+          <td title="${l.message}">${l.message}</td>
+          <td style="color:var(--muted);font-size:12px">${l.ip || '—'}</td>
+        </tr>`;
+    });
+  }
+
+  // ----- Generate Keys Modal -----
+  function openGenerateModal() {
+    document.getElementById('gen-result').style.display = 'none';
+    document.getElementById('copy-keys-btn').style.display = 'none';
+    document.getElementById('gen-qty').value = 1;
+    document.getElementById('gen-days').value = 0;
+    document.getElementById('gen-note').value = '';
+    document.getElementById('modal-generate').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('modal-generate').classList.remove('open');
+    loadKeys(); loadStats();
+  }
+
+  async function generateKeys() {
+    const qty = parseInt(document.getElementById('gen-qty').value) || 1;
+    const days = parseInt(document.getElementById('gen-days').value) || 0;
+    const note = document.getElementById('gen-note').value;
+    document.getElementById('gen-btn').textContent = 'Gerando...';
+
+    const res = await api('/api/admin/generate-keys', 'POST', {
+      quantity: qty,
+      expires_in_days: days > 0 ? days : null,
+      note
+    });
+
+    document.getElementById('gen-btn').textContent = 'Gerar Keys';
+
+    if (res?.success) {
+      const el = document.getElementById('gen-result');
+      el.textContent = res.keys.join('\n');
+      el.style.display = 'block';
+      document.getElementById('copy-keys-btn').style.display = 'block';
+      toast(`${res.keys.length} key(s) gerada(s)!`, 'success');
+    } else {
+      toast('Erro ao gerar keys.', 'error');
+    }
+  }
+
+  let generatedKeys = [];
+  async function generateKeys() {
+    const qty = parseInt(document.getElementById('gen-qty').value) || 1;
+    const days = parseInt(document.getElementById('gen-days').value) || 0;
+    const note = document.getElementById('gen-note').value;
+    document.getElementById('gen-btn').textContent = 'Gerando...';
+
+    const res = await api('/api/admin/generate-keys', 'POST', {
+      quantity: qty,
+      expires_in_days: days > 0 ? days : null,
+      note
+    });
+
+    document.getElementById('gen-btn').textContent = 'Gerar Keys';
+
+    if (res?.success) {
+      generatedKeys = res.keys;
+      const el = document.getElementById('gen-result');
+      el.textContent = res.keys.join('\n');
+      el.style.display = 'block';
+      document.getElementById('copy-keys-btn').style.display = 'block';
+      toast(`${res.keys.length} key(s) gerada(s) com sucesso!`, 'success');
+    } else {
+      toast('Erro ao gerar keys.', 'error');
+    }
+  }
+
+  function copyKeys() {
+    navigator.clipboard.writeText(generatedKeys.join('\n'));
+    toast('Keys copiadas!', 'success');
+  }
+
+  // ----- Helpers -----
+  function copyText(text) {
+    navigator.clipboard.writeText(text);
+    toast('Copiado!', 'success');
+  }
+
+  let toastTimeout;
+  function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => el.remove(), 3000);
+  }
+
+  // Fechar modal clicando fora
+  document.getElementById('modal-generate').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+</script>
+</body>
+</html>

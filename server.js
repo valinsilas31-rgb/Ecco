@@ -1,288 +1,301 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const Datastore = require('nedb-promises');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'; // MUDE ISSO!
+
+// --- Banco de dados NeDB (arquivos locais, zero compilação) ---
+const db = {
+  keys: Datastore.create({ filename: path.join(__dirname, 'data', 'keys.db'), autoload: true }),
+  users: Datastore.create({ filename: path.join(__dirname, 'data', 'users.db'), autoload: true }),
+  logs: Datastore.create({ filename: path.join(__dirname, 'data', 'logs.db'), autoload: true }),
+};
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// ===========================================
-// BANCO DE DADOS DE LICENÇAS (EM MEMÓRIA)
-// Em produção, use MongoDB, MySQL, PostgreSQL, etc.
-// ===========================================
+// --- Helpers ---
+function hashHWID(hwidData) {
+  const combined = `${hwidData.uuid}-${hwidData.diskSerial}`;
+  return crypto.createHash('sha256').update(combined).digest('hex');
+}
 
-const licenses = {
-    "TEST-1234-ABCD-5678": {
-        username: "Usuario1",
-        hwid: null, // null = permite qualquer HWID na primeira ativação
-        expiry: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60), // 30 dias
-        status: "active"
-    },
-    "LIFETIME-KEY-9999": {
-        username: "UsuarioVIP",
-        hwid: null,
-        expiry: 9999999999, // Lifetime (ano 2286)
-        status: "active"
-    },
-    "DEMO-KEY-2024": {
-        username: "Demo",
-        hwid: null,
-        expiry: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 dias
-        status: "active"
-    }
-};
+async function log(username, action, hwid, ip, success, message) {
+  await db.logs.insert({
+    username: username || 'unknown',
+    action, hwid: hwid || '', ip: ip || '',
+    success, message,
+    timestamp: new Date().toISOString()
+  });
+}
 
-// ===========================================
-// ROTAS
-// ===========================================
+function checkAdminAuth(req, res) {
+  const auth = req.headers['x-admin-password'];
+  if (auth !== ADMIN_PASSWORD) {
+    res.status(401).json({ success: false, message: 'Não autorizado.' });
+    return false;
+  }
+  return true;
+}
 
-// Rota principal
-app.get('/', (req, res) => {
-    res.json({
-        message: "LicenseGuard API - Sistema de Validação de Licenças",
-        version: "1.0.0",
-        endpoints: {
-            validate: "/api/validate?license=KEY&hwid=HWID",
-            create: "/api/create (POST)",
-            delete: "/api/delete (POST)",
-            list: "/api/list"
-        }
-    });
+function isKeyExpired(key) {
+  if (!key.expires_at) return false;
+  return new Date(key.expires_at) < new Date();
+}
+
+// ============================================================
+// API DO CLIENTE (APP)
+// ============================================================
+
+// Validação simples de KEY (para cheat externo)
+app.get('/api/validate', async (req, res) => {
+  const { license, hwid } = req.query;
+  const ip = req.ip;
+
+  if (!license) {
+    return res.json({ success: false, valid: false, message: 'Parâmetro license é obrigatório' });
+  }
+
+  if (!hwid) {
+    return res.json({ success: false, valid: false, message: 'Parâmetro hwid é obrigatório' });
+  }
+
+  // Buscar a key no banco
+  const key = await db.keys.findOne({ id: license });
+
+  if (!key) {
+    await log(null, 'validate', hwid, ip, false, 'Key não encontrada');
+    return res.json({ success: false, valid: false, status: 'invalid', message: 'Licença não encontrada ou inválida' });
+  }
+
+  // Verificar se está revogada
+  if (key.revoked) {
+    await log(key.username || 'unknown', 'validate', hwid, ip, false, 'Key revogada');
+    return res.json({ success: false, valid: false, status: 'revoked', message: 'Esta licença foi revogada' });
+  }
+
+  // Verificar expiração
+  if (isKeyExpired(key)) {
+    await log(key.username || 'unknown', 'validate', hwid, ip, false, 'Key expirada');
+    return res.json({ success: false, valid: false, status: 'expired', message: 'Licença expirada' });
+  }
+
+  // Verificar HWID (se já estiver registrado)
+  if (key.hwid === null) {
+    // Primeira ativação - registra o HWID
+    await db.keys.update({ id: license }, { $set: { hwid: hwid } });
+    await log(key.username || license, 'validate_first', hwid, ip, true, 'Primeira ativação - HWID registrado');
+  } else if (key.hwid !== hwid) {
+    // HWID diferente
+    await log(key.username || license, 'validate', hwid, ip, false, 'HWID não autorizado');
+    return res.json({ success: false, valid: false, status: 'hwid_mismatch', message: 'HWID não autorizado para esta licença' });
+  }
+
+  // Licença válida!
+  await log(key.username || license, 'validate', hwid, ip, true, 'Validação bem-sucedida');
+  
+  return res.json({
+    success: true,
+    valid: true,
+    status: 'active',
+    message: 'Licença válida',
+    username: key.username || 'User',
+    expiry: key.expires_at ? new Date(key.expires_at).getTime() / 1000 : 9999999999,
+    hwid: key.hwid
+  });
 });
 
-// Endpoint de validação (usado pelo client C++)
-app.get('/api/validate', (req, res) => {
-    const { license, hwid } = req.query;
+// Registrar nova conta
+app.post('/api/register', async (req, res) => {
+  const { username, password, key, hwid } = req.body;
+  const ip = req.ip;
 
-    // Validação dos parâmetros
-    if (!license) {
-        return res.status(400).json({
-            success: false,
-            valid: false,
-            message: "Parâmetro 'license' é obrigatório"
-        });
-    }
+  if (!username || !password || !key || !hwid) {
+    return res.json({ success: false, message: 'Todos os campos são obrigatórios.' });
+  }
 
-    if (!hwid) {
-        return res.status(400).json({
-            success: false,
-            valid: false,
-            message: "Parâmetro 'hwid' é obrigatório"
-        });
-    }
+  const existingKey = await db.keys.findOne({ id: key });
+  if (!existingKey) {
+    await log(username, 'register', null, ip, false, 'Key inválida');
+    return res.json({ success: false, message: 'Chave de licença inválida.' });
+  }
+  if (existingKey.revoked) {
+    await log(username, 'register', null, ip, false, 'Key revogada');
+    return res.json({ success: false, message: 'Esta chave foi revogada.' });
+  }
+  if (existingKey.used) {
+    await log(username, 'register', null, ip, false, 'Key já usada');
+    return res.json({ success: false, message: 'Esta chave já foi utilizada.' });
+  }
+  if (isKeyExpired(existingKey)) {
+    await log(username, 'register', null, ip, false, 'Key expirada');
+    return res.json({ success: false, message: 'Esta chave expirou.' });
+  }
 
-    // Verifica se a licença existe
-    const licenseData = licenses[license];
+  const existingUser = await db.users.findOne({ username });
+  if (existingUser) {
+    return res.json({ success: false, message: 'Nome de usuário já em uso.' });
+  }
 
-    if (!licenseData) {
-        return res.json({
-            success: false,
-            valid: false,
-            status: "invalid",
-            message: "Licença não encontrada ou inválida"
-        });
-    }
+  const hwidHash = hashHWID(hwid);
+  const hashedPassword = bcrypt.hashSync(password, 10);
+  const now = new Date().toISOString();
 
-    // Verifica se a licença está ativa
-    if (licenseData.status !== "active") {
-        return res.json({
-            success: false,
-            valid: false,
-            status: licenseData.status,
-            message: `Licença está ${licenseData.status}`
-        });
-    }
+  await db.keys.update({ id: key }, { $set: { used: true, hwid: hwidHash, username } });
+  await db.users.insert({ username, password: hashedPassword, key_id: key, hwid: hwidHash, created_at: now, last_login: null, blocked: false });
 
-    // Verifica se a licença expirou
-    const now = Math.floor(Date.now() / 1000);
-    if (licenseData.expiry < now) {
-        licenseData.status = "expired";
-        return res.json({
-            success: false,
-            valid: false,
-            status: "expired",
-            message: "Licença expirada"
-        });
-    }
-
-    // Verifica HWID (se já estiver registrado)
-    if (licenseData.hwid === null) {
-        // Primeira ativação - registra o HWID
-        licenseData.hwid = hwid;
-        console.log(`[ATIVAÇÃO] Licença ${license} ativada para HWID: ${hwid}`);
-    } else if (licenseData.hwid !== hwid) {
-        // HWID diferente do registrado
-        return res.json({
-            success: false,
-            valid: false,
-            status: "hwid_mismatch",
-            message: "HWID não autorizado para esta licença"
-        });
-    }
-
-    // Licença válida!
-    return res.json({
-        success: true,
-        valid: true,
-        status: "active",
-        message: "Licença válida",
-        username: licenseData.username,
-        expiry: licenseData.expiry.toString(),
-        hwid: licenseData.hwid
-    });
+  await log(username, 'register', hwidHash, ip, true, 'Conta criada com sucesso');
+  return res.json({ success: true, message: 'Conta criada com sucesso!' });
 });
 
-// Criar nova licença (POST)
-app.post('/api/create', (req, res) => {
-    const { license, username, days, hwid } = req.body;
+// Login
+app.post('/api/login', async (req, res) => {
+  const { username, password, hwid } = req.body;
+  const ip = req.ip;
 
-    if (!license || !username) {
-        return res.status(400).json({
-            success: false,
-            message: "Parâmetros 'license' e 'username' são obrigatórios"
-        });
-    }
+  if (!username || !password || !hwid) {
+    return res.json({ success: false, message: 'Todos os campos são obrigatórios.' });
+  }
 
-    if (licenses[license]) {
-        return res.status(400).json({
-            success: false,
-            message: "Esta licença já existe"
-        });
-    }
+  const user = await db.users.findOne({ username });
+  if (!user) {
+    await log(username, 'login', null, ip, false, 'Usuário não encontrado');
+    return res.json({ success: false, message: 'Usuário ou senha inválidos.' });
+  }
+  if (user.blocked) {
+    await log(username, 'login', null, ip, false, 'Usuário bloqueado');
+    return res.json({ success: false, message: 'Sua conta foi bloqueada. Entre em contato com o suporte.' });
+  }
+  if (!bcrypt.compareSync(password, user.password)) {
+    await log(username, 'login', null, ip, false, 'Senha incorreta');
+    return res.json({ success: false, message: 'Usuário ou senha inválidos.' });
+  }
 
-    const daysValue = parseInt(days) || 30;
-    const isLifetime = daysValue > 10000;
-    const expiryTimestamp = isLifetime 
-        ? 9999999999 
-        : Math.floor(Date.now() / 1000) + (daysValue * 24 * 60 * 60);
+  const key = await db.keys.findOne({ id: user.key_id });
+  if (!key || key.revoked) {
+    await log(username, 'login', null, ip, false, 'Key revogada');
+    return res.json({ success: false, message: 'Sua licença foi revogada. Entre em contato com o suporte.' });
+  }
+  if (isKeyExpired(key)) {
+    await log(username, 'login', null, ip, false, 'Key expirada');
+    return res.json({ success: false, message: 'Sua licença expirou.' });
+  }
 
-    licenses[license] = {
-        username: username,
-        hwid: hwid || null,
-        expiry: expiryTimestamp,
-        status: "active"
-    };
+  const hwidHash = hashHWID(hwid);
+  if (user.hwid && user.hwid !== hwidHash) {
+    await log(username, 'login', hwidHash, ip, false, 'HWID diferente — uso em outro PC bloqueado');
+    return res.json({ success: false, message: 'Este login está vinculado a outro dispositivo.' });
+  }
 
-    res.json({
-        success: true,
-        message: "Licença criada com sucesso",
-        license: license,
-        username: username,
-        expiry: expiryTimestamp,
-        days: isLifetime ? "Lifetime" : daysValue
-    });
+  // Se HWID ainda não definido (reset), vincular agora
+  if (!user.hwid) {
+    await db.users.update({ username }, { $set: { hwid: hwidHash } });
+    await db.keys.update({ id: user.key_id }, { $set: { hwid: hwidHash } });
+  }
 
-    console.log(`[CRIAÇÃO] Nova licença criada: ${license} para ${username}`);
+  await db.users.update({ username }, { $set: { last_login: new Date().toISOString() } });
+  await log(username, 'login', hwidHash, ip, true, 'Login bem-sucedido');
+  return res.json({ success: true, message: 'Login realizado com sucesso!' });
 });
 
-// Deletar licença (POST)
-app.post('/api/delete', (req, res) => {
-    const { license } = req.body;
+// ============================================================
+// API ADMIN
+// ============================================================
 
-    if (!license) {
-        return res.status(400).json({
-            success: false,
-            message: "Parâmetro 'license' é obrigatório"
-        });
-    }
-
-    if (!licenses[license]) {
-        return res.status(404).json({
-            success: false,
-            message: "Licença não encontrada"
-        });
-    }
-
-    delete licenses[license];
-
-    res.json({
-        success: true,
-        message: "Licença deletada com sucesso"
-    });
-
-    console.log(`[DELEÇÃO] Licença deletada: ${license}`);
+app.get('/api/admin/stats', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const totalKeys = await db.keys.count({});
+  const usedKeys = await db.keys.count({ used: true });
+  const revokedKeys = await db.keys.count({ revoked: true });
+  const totalUsers = await db.users.count({});
+  const blockedUsers = await db.users.count({ blocked: true });
+  const yesterday = new Date(Date.now() - 86400000).toISOString();
+  const recentLogs = await db.logs.count({ timestamp: { $gt: yesterday } });
+  res.json({ success: true, stats: { totalKeys, usedKeys, revokedKeys, totalUsers, blockedUsers, recentLogs } });
 });
 
-// Listar todas as licenças
-app.get('/api/list', (req, res) => {
-    const licenseList = Object.keys(licenses).map(key => ({
-        license: key,
-        username: licenses[key].username,
-        hwid: licenses[key].hwid || "Não ativada",
-        expiry: licenses[key].expiry,
-        status: licenses[key].status,
-        daysRemaining: Math.floor((licenses[key].expiry - Math.floor(Date.now() / 1000)) / 86400)
-    }));
-
-    res.json({
-        success: true,
-        count: licenseList.length,
-        licenses: licenseList
-    });
+app.get('/api/admin/keys', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const keys = await db.keys.find({}).sort({ created_at: -1 });
+  res.json({ success: true, data: keys });
 });
 
-// Resetar HWID de uma licença (POST)
-app.post('/api/reset-hwid', (req, res) => {
-    const { license } = req.body;
-
-    if (!license) {
-        return res.status(400).json({
-            success: false,
-            message: "Parâmetro 'license' é obrigatório"
-        });
-    }
-
-    if (!licenses[license]) {
-        return res.status(404).json({
-            success: false,
-            message: "Licença não encontrada"
-        });
-    }
-
-    licenses[license].hwid = null;
-
-    res.json({
-        success: true,
-        message: "HWID resetado com sucesso. Licença pode ser reativada."
-    });
-
-    console.log(`[RESET] HWID resetado para licença: ${license}`);
+app.get('/api/admin/users', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const users = await db.users.find({}, { password: 0 }).sort({ created_at: -1 });
+  res.json({ success: true, data: users });
 });
 
-// Rota 404
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: "Endpoint não encontrado"
-    });
+app.get('/api/admin/logs', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const logs = await db.logs.find({}).sort({ timestamp: -1 }).limit(200);
+  res.json({ success: true, data: logs });
 });
 
-// Iniciar servidor
+app.post('/api/admin/generate-keys', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const { quantity = 1, expires_in_days, note } = req.body;
+  const created = [];
+  const now = new Date().toISOString();
+
+  for (let i = 0; i < Math.min(quantity, 100); i++) {
+    const id = `COREUP-${uuidv4().toUpperCase().slice(0, 8)}-${uuidv4().toUpperCase().slice(0, 4)}`;
+    const expiresAt = expires_in_days ? new Date(Date.now() + expires_in_days * 86400000).toISOString() : null;
+    await db.keys.insert({ id, created_at: now, expires_at: expiresAt, used: false, revoked: false, hwid: null, username: null, note: note || '' });
+    created.push(id);
+  }
+  res.json({ success: true, keys: created });
+});
+
+app.post('/api/admin/revoke-key', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  await db.keys.update({ id: req.body.key_id }, { $set: { revoked: true } });
+  res.json({ success: true, message: 'Key revogada.' });
+});
+
+app.post('/api/admin/reset-hwid', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const key = await db.keys.findOne({ id: req.body.key_id });
+  if (!key) return res.json({ success: false, message: 'Key não encontrada.' });
+  await db.keys.update({ id: req.body.key_id }, { $set: { hwid: null } });
+  if (key.username) await db.users.update({ username: key.username }, { $set: { hwid: null } });
+  res.json({ success: true, message: 'HWID resetado com sucesso.' });
+});
+
+app.post('/api/admin/toggle-block-user', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const user = await db.users.findOne({ username: req.body.username });
+  if (!user) return res.json({ success: false, message: 'Usuário não encontrado.' });
+  const newState = !user.blocked;
+  await db.users.update({ username: req.body.username }, { $set: { blocked: newState } });
+  res.json({ success: true, blocked: newState, message: newState ? 'Usuário bloqueado.' : 'Usuário desbloqueado.' });
+});
+
+app.post('/api/admin/delete-user', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+  const user = await db.users.findOne({ username: req.body.username });
+  if (!user) return res.json({ success: false, message: 'Usuário não encontrado.' });
+  await db.keys.update({ id: user.key_id }, { $set: { used: false, hwid: null, username: null } });
+  await db.users.remove({ username: req.body.username }, {});
+  res.json({ success: true, message: 'Usuário deletado e key liberada.' });
+});
+
+// Criar pasta data se não existir
+const fs = require('fs');
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
+
 app.listen(PORT, () => {
-    console.log(`
-╔════════════════════════════════════════════╗
-║   LicenseGuard API - Servidor Rodando     ║
-╚════════════════════════════════════════════╝
-
-🚀 Porta: ${PORT}
-🌐 URL: http://localhost:${PORT}
-
-📋 Licenças de teste disponíveis:
-   - TEST-1234-ABCD-5678 (30 dias)
-   - LIFETIME-KEY-9999 (Lifetime)
-   - DEMO-KEY-2024 (7 dias)
-
-📡 Endpoints:
-   GET  /api/validate?license=KEY&hwid=HWID
-   POST /api/create
-   POST /api/delete
-   POST /api/reset-hwid
-   GET  /api/list
-
-✅ Pronto para receber requisições!
-    `);
+  console.log(`\n🚀 Core UP License Server na porta ${PORT}`);
+  console.log(`🔐 Painel Admin: http://localhost:${PORT}`);
+  console.log(`🔑 Senha admin: ${ADMIN_PASSWORD}`);
+  console.log(`\n⚠️  MUDE a ADMIN_PASSWORD antes de colocar online!\n`);
 });
